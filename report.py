@@ -10,7 +10,6 @@ import os
 import sys
 import tempfile
 import smtplib
-
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -43,13 +42,11 @@ MEASUREMENT   = "sensor_readings"
 # E-Mail Konfiguration
 SMTP_HOST     = "smtp.gmail.com"
 SMTP_PORT     = 587
-SMTP_USER     = "email@gmail.com"
-SMTP_PASSWORD = "passwort anpassen"
-EMAIL_FROM    = "email@gmail.com"
-EMAIL_TO      = ["email@gmail.com"]
+SMTP_USER     = "gischmatthias@gmail.com"
+SMTP_PASSWORD = "hxvp qpha lcms jbww"
+EMAIL_FROM    = "gischmatthias@gmail.com"
+EMAIL_TO      = ["matthiasgisch@example.com"]
 EMAIL_SUBJECT = "Woechentlicher Monitoring-Bericht"
-
-TEMP_SENSORS = [f"temp_sensor_{i}" for i in range(8)]
 
 VEHICLES = {
     "CAR_001": {
@@ -59,12 +56,40 @@ VEHICLES = {
     },
     "CAR_002": {
         "name":        "Fahrzeug 2",
-        "kennzeichen": "CAR_002",
+        "kennzeichen": "Y-49-3779",
         "threshold":   2200,
     },
 }
 
+# Plot-Gruppen
+PLOT_GROUPS = [
+    {
+        "title":   "Temperatur Bank 1",
+        "sensors": ["temp_sensor_0", "temp_sensor_1", "temp_sensor_2"],
+        "ylabel":  "Temperatur (°C)",
+    },
+    {
+        "title":   "Temperatur Bank 2",
+        "sensors": ["temp_sensor_3", "temp_sensor_4", "temp_sensor_5"],
+        "ylabel":  "Temperatur (°C)",
+    },
+    {
+        "title":   "Stauklappe Bank 1",
+        "sensors": ["temp_sensor_6"],
+        "ylabel":  "Temperatur (°C)",
+    },
+    {
+        "title":   "Stauklappe Bank 2",
+        "sensors": ["temp_sensor_7"],
+        "ylabel":  "Temperatur (°C)",
+    },
+]
+
+ALL_SENSORS = [s for g in PLOT_GROUPS for s in g["sensors"]]
 OUTPUT_FILE = f"wochenbericht_{datetime.now().strftime('%Y%m%d')}.pdf"
+
+COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+          "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"]
 
 # ── Token laden ──────────────────────────────────────────────────────────────
 
@@ -83,7 +108,7 @@ def query_influx(client, sql):
     return client.query(sql, language="sql").to_pandas()
 
 def get_temperature_data(client, car_id, days=7):
-    sensors = ", ".join(f'AVG("{s}") AS "{s}"' for s in TEMP_SENSORS)
+    sensors = ", ".join(f'AVG("{s}") AS "{s}"' for s in ALL_SENSORS)
     sql = f"""
         SELECT DATE_BIN(INTERVAL '1 hour', time, '1970-01-01') AS ts, {sensors}
         FROM "{MEASUREMENT}"
@@ -109,7 +134,7 @@ def get_events(client, car_id, threshold, days=7):
 def get_summary_stats(client, car_id, days=7):
     aggs = ", ".join(
         f'MIN("{s}") AS "min_{s}", MAX("{s}") AS "max_{s}", AVG("{s}") AS "avg_{s}"'
-        for s in TEMP_SENSORS
+        for s in ALL_SENSORS
     )
     sql = f"""
         SELECT {aggs} FROM "{MEASUREMENT}"
@@ -119,38 +144,39 @@ def get_summary_stats(client, car_id, days=7):
 
 # ── Plot ─────────────────────────────────────────────────────────────────────
 
-SENSOR_LABELS = {f"temp_sensor_{i}": f"Temp Sensor {i}" for i in range(8)}
-COLORS = ["#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd","#8c564b","#e377c2","#7f7f7f"]
-
-def plot_temperatures(df, vehicle_name, events_df=None):
-    fig, ax = plt.subplots(figsize=(14, 5))
+def make_plot(df, group, vehicle_name, events_df=None):
+    """Erstellt einen Plot für eine Sensor-Gruppe."""
+    fig, ax = plt.subplots(figsize=(14, 4))
     fig.patch.set_facecolor("#1a1a2e")
     ax.set_facecolor("#16213e")
 
     if df is not None and not df.empty and "ts" in df.columns:
         df["ts"] = df["ts"].astype("datetime64[ns]")
-        for i, sensor in enumerate(TEMP_SENSORS):
+        for i, sensor in enumerate(group["sensors"]):
             if sensor in df.columns:
-                ax.plot(df["ts"], df[sensor], label=SENSOR_LABELS[sensor],
-                        color=COLORS[i], linewidth=1.2, alpha=0.9)
+                ax.plot(df["ts"], df[sensor], label=sensor.replace("_", " ").title(),
+                        color=COLORS[i % len(COLORS)], linewidth=1.2, alpha=0.9)
+
         if events_df is not None and not events_df.empty and "ts" in events_df.columns:
             events_df["ts"] = events_df["ts"].astype("datetime64[ns]")
             for ts in events_df["ts"]:
                 ax.axvline(x=ts, color="#ff4444", alpha=0.4, linewidth=1)
+
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m %H:%M"))
         plt.xticks(rotation=30, ha="right")
     else:
         ax.text(0.5, 0.5, "Keine Daten verfügbar", ha="center", va="center",
                 color="white", fontsize=12, transform=ax.transAxes)
 
-    ax.set_title(f"Temperaturverlauf – {vehicle_name}", color="white", fontsize=13, pad=10)
+    ax.set_title(f"{group['title']} – {vehicle_name}", color="white", fontsize=12, pad=8)
     ax.set_xlabel("Zeit", color="#aaaaaa")
-    ax.set_ylabel("Temperatur (°C)", color="#aaaaaa")
+    ax.set_ylabel(group["ylabel"], color="#aaaaaa")
     ax.tick_params(colors="#aaaaaa")
-    for spine in ["top","right"]: ax.spines[spine].set_visible(False)
-    for spine in ["bottom","left"]: ax.spines[spine].set_color("#444")
-    ax.legend(loc="upper left", fontsize=7, ncol=2,
-              facecolor="#0f3460", labelcolor="white", framealpha=0.7)
+    for spine in ["top", "right"]: ax.spines[spine].set_visible(False)
+    for spine in ["bottom", "left"]: ax.spines[spine].set_color("#444")
+    if len(group["sensors"]) > 1:
+        ax.legend(loc="upper left", fontsize=8, facecolor="#0f3460",
+                  labelcolor="white", framealpha=0.7)
     ax.grid(True, alpha=0.15, color="#ffffff")
     plt.tight_layout()
 
@@ -182,12 +208,12 @@ def build_stats_table(stats_df):
         return None
     rows = [["Sensor", "Min (°C)", "Max (°C)", "Ø (°C)"]]
     row = stats_df.iloc[0]
-    for sensor in TEMP_SENSORS:
+    for sensor in ALL_SENSORS:
         mn = row.get(f"min_{sensor}")
         mx = row.get(f"max_{sensor}")
         av = row.get(f"avg_{sensor}")
         rows.append([
-            SENSOR_LABELS[sensor],
+            sensor.replace("_", " ").title(),
             f"{mn:.1f}" if mn is not None and not np.isnan(float(mn)) else "–",
             f"{mx:.1f}" if mx is not None and not np.isnan(float(mx)) else "–",
             f"{av:.1f}" if av is not None and not np.isnan(float(av)) else "–",
@@ -218,6 +244,7 @@ def build_pdf(data, output_path):
     week_start = (now - timedelta(days=7)).strftime("%d.%m.%Y")
     week_end   = now.strftime("%d.%m.%Y")
 
+    # Deckblatt
     story += [
         Spacer(1, 3*cm),
         Paragraph("Wöchentlicher Monitoring-Bericht", s_title),
@@ -228,32 +255,35 @@ def build_pdf(data, output_path):
         Paragraph(f"Erstellt am: {now.strftime('%d.%m.%Y %H:%M')} Uhr", s_body),
         Spacer(1, 1*cm),
     ]
-
     for car_id, vdata in data.items():
         cfg = VEHICLES[car_id]
         n = len(vdata["events_df"]) if vdata["events_df"] is not None and not vdata["events_df"].empty else 0
         story.append(Paragraph(
             f"<b>{cfg['name']} ({cfg['kennzeichen']}):</b> {n} Ereignis(se) über {cfg['threshold']} hPa",
             s_body))
-
     story.append(PageBreak())
 
+    # Pro Fahrzeug
     for car_id, vdata in data.items():
         cfg = VEHICLES[car_id]
         story += [
             Paragraph(f"{cfg['name']} – {cfg['kennzeichen']}", s_h2),
             HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#cccccc")),
             Spacer(1, 0.3*cm),
-            Paragraph("Temperaturverlauf (letzte 7 Tage)", s_h3),
         ]
-        if vdata["plot_path"]:
-            story.append(Image(vdata["plot_path"], width=16*cm, height=6*cm))
+
+        # 4 Plots
+        for i, (group, plot_path) in enumerate(zip(PLOT_GROUPS, vdata["plot_paths"])):
+            story.append(Paragraph(group["title"], s_h3))
+            story.append(Image(plot_path, width=16*cm, height=5*cm))
             n = len(vdata["events_df"]) if vdata["events_df"] is not None and not vdata["events_df"].empty else 0
             if n > 0:
                 story.append(Paragraph(
-                    f"Rote Markierungen = {n} Ereignis(se) über {cfg['threshold']} hPa", s_center))
+                    f"Rote Linien = Abgasdruckereignisse über {cfg['threshold']} hPa", s_center))
+            story.append(Spacer(1, 0.3*cm))
 
-        story += [Spacer(1, 0.4*cm), Paragraph("Statistik Temperatursensoren", s_h3)]
+        # Statistik
+        story += [Spacer(1, 0.3*cm), Paragraph("Statistik Temperatursensoren", s_h3)]
         td = vdata["stats_table"]
         if td:
             t = Table(td, colWidths=[5*cm, 3*cm, 3*cm, 3*cm])
@@ -270,9 +300,8 @@ def build_pdf(data, output_path):
                 ("BOTTOMPADDING",(0,0),(-1,-1),4),
             ]))
             story.append(t)
-        else:
-            story.append(Paragraph("Keine Statistikdaten verfügbar.", s_body))
 
+        # Ereignisse
         story += [Spacer(1, 0.5*cm),
                   Paragraph(f"Abgasdruckereignisse (Schwellwert: {cfg['threshold']} hPa)", s_h3)]
         for line in vdata["events_text"]:
@@ -291,14 +320,12 @@ def send_email(pdf_path):
     msg["From"]    = EMAIL_FROM
     msg["To"]      = ", ".join(EMAIL_TO)
     msg["Subject"] = EMAIL_SUBJECT
-
-    body = (f"Hallo,\n\nanbei der wöchentliche Fahrzeug-Monitoring-Bericht "
+    body = (f"Hallo,\n\nanbei der wöchentliche Monitoring-Bericht "
             f"vom {now.strftime('%d.%m.%Y')}.\n\n"
             f"Berichtszeitraum: {(now-timedelta(days=7)).strftime('%d.%m.%Y')} – "
             f"{now.strftime('%d.%m.%Y')}\n\n"
             f"Mit freundlichen Grüßen\nIhr Monitoring-System")
     msg.attach(MIMEText(body, "plain"))
-
     with open(pdf_path, "rb") as f:
         part = MIMEBase("application", "octet-stream")
         part.set_payload(f.read())
@@ -306,7 +333,6 @@ def send_email(pdf_path):
     part.add_header("Content-Disposition",
                     f"attachment; filename={os.path.basename(pdf_path)}")
     msg.attach(part)
-
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
         server.starttls()
         server.login(SMTP_USER, SMTP_PASSWORD)
@@ -331,13 +357,18 @@ def main():
         temp_df   = get_temperature_data(client, car_id)
         events_df = get_events(client, car_id, cfg["threshold"])
         stats_df  = get_summary_stats(client, car_id)
-        plot_path = plot_temperatures(temp_df, cfg["name"], events_df)
-        tmp_files.append(plot_path)
+
+        plot_paths = []
+        for group in PLOT_GROUPS:
+            path = make_plot(temp_df, group, cfg["name"], events_df)
+            plot_paths.append(path)
+            tmp_files.append(path)
+
         data[car_id] = {
             "events_df":   events_df,
             "events_text": describe_events(events_df, cfg["threshold"]),
             "stats_table": build_stats_table(stats_df),
-            "plot_path":   plot_path,
+            "plot_paths":  plot_paths,
         }
 
     output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), OUTPUT_FILE)
