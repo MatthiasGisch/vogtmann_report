@@ -45,7 +45,7 @@ SMTP_PORT     = 587
 SMTP_USER     = "gischmatthias@gmail.com"
 SMTP_PASSWORD = "hxvp qpha lcms jbww"
 EMAIL_FROM    = "gischmatthias@gmail.com"
-EMAIL_TO      = ["matthiasgisch@example.com"]
+EMAIL_TO      = ["matthiasgisch@gmail.com"]
 EMAIL_SUBJECT = "Woechentlicher Monitoring-Bericht"
 
 VEHICLES = {
