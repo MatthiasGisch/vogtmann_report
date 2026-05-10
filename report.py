@@ -36,7 +36,7 @@ from reportlab.lib.enums import TA_CENTER
 # ── Konfiguration ────────────────────────────────────────────────────────────
 
 INFLUXDB_HOST = "http://127.0.0.1:8181"
-TOKEN_FILE    = "/home/princess_donut/influx/admin-token.json"
+TOKEN_FILE    = "/home/princess_donut/influx/admin_token.json"
 DATABASE      = "sensor_data"
 MEASUREMENT   = "sensor_readings"
 
