@@ -12,7 +12,18 @@
 #   bash update.sh
 #
 # Danach genuegt:  bash update.sh
+#
+# Trockenlauf (zeigt nur, was passieren wuerde, aendert nichts):
+#   bash update.sh --dry-run
+#
+# Das Skript schreibt ausschliesslich in $DIR und /tmp. Es fuehrt keine
+# Datenbankbefehle aus, loescht keine Bestandsdateien und fasst weder
+# compose.yaml noch admin-token.json noch die InfluxDB-Volumes an.
 set -euo pipefail
+
+DRY=0
+[ "${1:-}" = "--dry-run" ] && DRY=1 && echo "TROCKENLAUF — es wird nichts geaendert."
+run() { if [ "$DRY" = "1" ]; then echo "    [wuerde ausfuehren] $*"; else "$@"; fi; }
 
 REPO_USER="${REPO_USER:-MatthiasGisch}"
 REPO_NAME="${REPO_NAME:-vogtmann_report}"
@@ -35,7 +46,7 @@ FILES=(
 )
 
 echo "Zielverzeichnis: $DIR"
-mkdir -p "$DIR/berichte"
+run mkdir -p "$DIR/berichte"
 
 # --------------------------------------------------------- Abhaengigkeiten --
 echo
@@ -45,17 +56,31 @@ for mod in pandas numpy matplotlib reportlab influxdb_client_3; do
   python3 -c "import $mod" 2>/dev/null || MISSING+=("$mod")
 done
 if [ ${#MISSING[@]} -gt 0 ]; then
-  echo "  Fehlend: ${MISSING[*]} — installiere …"
-  pip3 install influxdb3-python matplotlib reportlab pandas --break-system-packages
+  # Nur die tatsaechlich fehlenden Pakete, nie pauschal alle: ein
+  # "pip3 install pandas" auf einem System, das pandas schon hat, kann
+  # Abhaengigkeiten hochziehen und andere Python-Anwendungen auf dem Server
+  # beschaedigen. Kein -U, also werden vorhandene Versionen nicht angefasst.
+  PKGS=()
+  for m in "${MISSING[@]}"; do
+    case "$m" in
+      influxdb_client_3) PKGS+=("influxdb3-python") ;;
+      *)                 PKGS+=("$m") ;;
+    esac
+  done
+  echo "  Fehlend: ${MISSING[*]}"
+  echo "  Installiere: ${PKGS[*]}"
+  run pip3 install "${PKGS[@]}" --break-system-packages
 else
-  echo "  Alle vorhanden."
+  echo "  Alle vorhanden — es wird nichts installiert."
 fi
 
 # ------------------------------------------------------------- Archiv ------
 echo
 echo "Lade Archiv …"
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+[ -n "$TMP" ] && [ -d "$TMP" ] || { echo "  FEHLER: kein Temporaerverzeichnis"; exit 1; }
+# Absicherung: nur ein echtes mktemp-Verzeichnis unter /tmp wird geloescht
+trap '[ -n "${TMP:-}" ] && [ -d "$TMP" ] && case "$TMP" in /tmp/*) rm -rf "$TMP";; esac' EXIT
 
 if ! curl -fsSL "$TARBALL" -o "$TMP/src.tar.gz"; then
   echo "  FEHLER: Archiv nicht ladbar."
@@ -73,27 +98,35 @@ for f in "${FILES[@]}"; do
   [ -f "$SRC/$f" ] || { echo "  FEHLER: $f fehlt im Archiv — Abbruch, nichts geaendert."; exit 1; }
 done
 for f in "${FILES[@]}"; do
-  cp "$SRC/$f" "$DIR/$f"
-  printf '  %-20s ok\n' "$f"
+  if [ -f "$DIR/$f" ] && cmp -s "$SRC/$f" "$DIR/$f"; then
+    printf '  %-20s unveraendert\n' "$f"
+  else
+    run cp "$SRC/$f" "$DIR/$f"
+    printf '  %-20s aktualisiert\n' "$f"
+  fi
 done
 
 # update.sh zuletzt und separat: ein Skript, das sich waehrend der eigenen
 # Ausfuehrung ersetzt, kann still abbrechen.
 if [ -f "$SRC/update.sh" ] && ! cmp -s "$SRC/update.sh" "$DIR/update.sh"; then
-  cp "$SRC/update.sh" "$DIR/update.sh.new"
+  run cp "$SRC/update.sh" "$DIR/update.sh.new"
   echo "  update.sh: neue Fassung liegt als update.sh.new bereit"
   echo "             uebernehmen mit:  mv $DIR/update.sh.new $DIR/update.sh"
 fi
 
 # .env wird nie angefasst - dort stehen die Zugangsdaten.
 if [ ! -f "$DIR/.env" ]; then
-  cat > "$DIR/.env" <<'ENV'
+  if [ "$DRY" = "1" ]; then
+    echo "    [wuerde anlegen] $DIR/.env"
+  else
+    cat > "$DIR/.env" <<'ENV'
 SMTP_USER=
 SMTP_PASSWORD=
 EMAIL_FROM=
 EMAIL_TO=
 ENV
-  chmod 600 "$DIR/.env"
+  fi
+  run chmod 600 "$DIR/.env"
   echo
   echo "  .env angelegt — bitte ausfuellen:  nano $DIR/.env"
 else
