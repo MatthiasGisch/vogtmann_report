@@ -1,0 +1,9 @@
+# Zugangsdaten - niemals einchecken
+.env
+
+# Laufzeit-Ausgaben auf dem Server
+berichte/
+report.log
+update.sh.new
+__pycache__/
+*.pyc
