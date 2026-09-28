@@ -43,6 +43,7 @@ FILES=(
   fake_data.py
   mailer.py
   run_report.py
+  check_signals.py
 )
 
 echo "Zielverzeichnis: $DIR"

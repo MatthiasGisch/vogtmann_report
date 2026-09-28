@@ -172,7 +172,7 @@ def pressure(df, axis, threshold, evs, path, width_cm=16.6, height_cm=4.5):
                 va="bottom", color=INK_SECONDARY, fontsize=6.0,
                 bbox=dict(facecolor="white", edgecolor="none", pad=1.0))
 
-    _frame(ax, "Abgasgegendruck", "mbar")
+    _frame(ax, "Abgasgegendruck", "Rohwert")
     axis.apply(ax)
     _legend(ax, ncol=2)
     fig.tight_layout(pad=0.4)

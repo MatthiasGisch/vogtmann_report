@@ -16,7 +16,7 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "berichte")
 INFLUX_HOST     = os.environ.get("INFLUX_HOST", "http://127.0.0.1:8181")
 INFLUX_DATABASE = "sensor_data"
 INFLUX_TABLE    = "sensor_readings"
-INFLUX_TOKEN_FILE = os.path.join(BASE_DIR, "admin-token.json")
+INFLUX_TOKEN_FILE = os.path.join(BASE_DIR, "admin_token.json")
 
 # Die Datenbank speichert UTC. Alle Zeitangaben im Bericht sollen Ortszeit sein,
 # sonst stimmen die Uhrzeiten in der Vorfallstabelle im Sommer um zwei Stunden
@@ -48,8 +48,8 @@ MIN_BAND_K = 5.0             # absolutes Mindestband für Temperaturdifferenzen
 MIN_ABS_BAND = {
     "bank1_mean":     8.0,    # K
     "bank2_mean":     8.0,    # K
-    "press_p50":     60.0,    # mbar
-    "press_p95":     60.0,    # mbar
+    "press_p50":     60.0,    # Rohwert
+    "press_p95":     60.0,    # Rohwert
     "event_rate":     1.0,    # Vorfälle je 10 Betriebsstunden
     "bank_delta_p95": MIN_BAND_K,
     "spread1_p95":    MIN_BAND_K,
@@ -91,10 +91,33 @@ FLAP_TEMPS  = ["temp_sensor_6", "temp_sensor_7"]
 PRESSURES   = ["abgas_1_value", "abgas_2_value"]
 
 # Plausibilitätsgrenzen für die Bereichsprüfung (Konzept 10.) - fachlich zu prüfen
+# Plausibilitaetsgrenzen der Bereichspruefung.
+#
+# Temperatur: Die Thermoelemente sind laut Herstellerangebot (HAIVEMIND,
+# 16.12.2025) auf -200 bis +350 °C spezifiziert. Die frueheren Grenzen
+# (-40/+900) stammten aus der Annahme, es handle sich um Abgastemperaturen im
+# Stroemungskanal - das trifft nicht zu.
+#
+# Druck: Die Einheit ist UNBEKANNT (Rohwerte). Gemessen wurden im Stillstand
+# Werte nahe null und beim Anlassen ~13.000. Die frueher angesetzte Obergrenze
+# von 6000 hat genau die echten Ereignisse als "Sensorfehler" verworfen. Bis der
+# Hersteller die Skalierung nennt, ist die Grenze bewusst sehr weit - sie faengt
+# nur noch offensichtlichen Unsinn ab.
 RANGE_LIMITS = {
-    "temp": (-40.0, 900.0),
-    "pressure": (0.0, 6000.0),
+    "temp": (-200.0, 350.0),
+    "pressure": (-5000.0, 100000.0),
 }
+
+# Ab welchem Abgasgegendruck gilt der Motor als laufend.
+#
+# Es gibt kein Betriebszustandssignal. Der Abgasgegendruck ist der beste Ersatz,
+# weil er nur bei laufendem Motor entsteht - anders als die Temperatur, die nach
+# dem Abstellen noch lange nachlaeuft.
+#
+# None = Betriebserkennung deaktiviert, es wird wie bisher ueber die
+# Warmlaufgrenze gefiltert. Den Wert erst nach "python3 check_signals.py"
+# setzen, nicht raten.
+PRESSURE_OPERATING_THRESHOLD = None
 
 # --------------------------------------------------------------- Fahrzeuge ---
 VEHICLES = [

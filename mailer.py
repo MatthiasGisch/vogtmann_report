@@ -5,7 +5,7 @@ E-Mail-Versand des fertigen Berichts.
 Zugangsdaten kommen aus einer .env-Datei neben dem Skript und stehen damit
 nicht mehr im Quelltext (offener Punkt aus der Doku, Abschnitt 6).
 
-    /home/princess_donut/influx/.env
+    /home/princess_donut/influx/.env.report
         SMTP_USER=beispiel@gmail.com
         SMTP_PASSWORD=xxxx xxxx xxxx xxxx
         EMAIL_FROM=beispiel@gmail.com
@@ -27,7 +27,9 @@ SMTP_PORT = 587
 def load_env(path=None):
     """Minimaler .env-Leser - kein python-dotenv nötig, das ist auf dem Server
     nicht installiert und soll nicht extra dazukommen."""
-    path = path or os.path.join(BASE_DIR, ".env")
+    # .env.report, nicht .env: die .env im selben Verzeichnis gehoert
+    # dem Docker-Compose-Setup der InfluxDB.
+    path = path or os.path.join(BASE_DIR, ".env.report")
     if not os.path.exists(path):
         raise FileNotFoundError(
             f".env nicht gefunden: {path}\n"

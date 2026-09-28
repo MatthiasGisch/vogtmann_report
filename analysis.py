@@ -333,7 +333,7 @@ def data_quality(df):
             findings.append({
                 "kind": "Bereich-Druck",
                 "text": f"Abgasgegendruck {label}: {bad} Messwerte außerhalb des "
-                        f"plausiblen Bereichs ({plo:.0f}–{phi:.0f} mbar). "
+                        f"plausiblen Bereichs. "
                         f"Auffälligkeiten aus diesem Zeitraum sind nicht belastbar.",
             })
 
@@ -349,8 +349,11 @@ METRIC_LABELS = {
     "spread1_p95":    ("Abweichung innerhalb Bank 1", "K", 1),
     "spread2_p95":    ("Abweichung innerhalb Bank 2", "K", 1),
     "flap_delta_p95": ("Unterschied der Stauklappentemperaturen", "K", 1),
-    "press_p50":      ("Abgasgegendruck typisch", "mbar", 0),
-    "press_p95":      ("Abgasgegendruck hoch", "mbar", 0),
+    # Einheit bewusst leer: die Sensoren liefern Rohwerte, die Skalierung ist
+    # beim Hersteller angefragt. "mbar" war eine Annahme und stand faelschlich
+    # im Kundenbericht.
+    "press_p50":      ("Abgasgegendruck typisch", "", 0),
+    "press_p95":      ("Abgasgegendruck hoch", "", 0),
     "event_rate":     ("Auffälligkeiten je 10 Betriebsstunden", "", 1),
 }
 

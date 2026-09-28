@@ -360,7 +360,7 @@ def page_measurements(c, r, ctx, page_no, total, p):
             e["start"].strftime("%d.%m. %H:%M") + " Uhr",
             f"{de(e['duration_min'], 0)} min",
             f"Bank {e['side']}",
-            f"{de(e['peak'], 0)} mbar",
+            f"{de(e['peak'], 0)}",
             f"+{de(e['over_pct'], 0)} %",
             f"{de(e['temp_max'], 0)} °C",
             (e["severity"], col)])
