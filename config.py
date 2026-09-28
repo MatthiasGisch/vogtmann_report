@@ -66,6 +66,11 @@ RED_FACTOR = 2.0
 # ueberhaupt gebildet wird (sonst NaN = nicht bewertet).
 MIN_RATE_HOURS = 5.0
 
+# Mindest-Betriebszeit der Berichtswoche fuer eine Bewertung ueberhaupt.
+# Darunter stehen die Kennzahlen auf einer Handvoll Bins - der Bericht weist
+# die Messwerte dann aus, bewertet sie aber nicht.
+MIN_WEEK_OPERATING_HOURS = 2.0
+
 # ------------------------------------------------------------- Messstellen ---
 # Bezeichnungen wie im bestehenden Bericht und im Grafana-Dashboard:
 # "Bank 1 / Bank 2" bleibt der fuehrende Begriff. Die drei Messstellen je Bank

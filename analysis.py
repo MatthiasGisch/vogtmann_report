@@ -27,7 +27,7 @@ from config import (BANK1_TEMPS, BANK2_TEMPS, FLAP_TEMPS, BIN_MINUTES,
                     MIN_ABS_BAND, REF_MIN_OPERATING_HOURS, RANGE_LIMITS, STATUS,
                     SENSOR_LABELS, RED_FACTOR, PRESSURES, MIN_RATE_HOURS,
                     DEFAULT_OPERATING_THRESHOLD, OCCUPANCY_OPERATING_LIMIT,
-                    SENTINEL_VALUES)
+                    SENTINEL_VALUES, MIN_WEEK_OPERATING_HOURS)
 
 
 # ----------------------------------------------------------- Grundgerüst ----
@@ -341,9 +341,12 @@ def data_quality(df, veh=None):
         return ([{"kind": "Ausfall", "text": "Keine gültigen Messdaten im Zeitraum."}],
                 [], 0.0)
 
-    # Erwartete Bins = Bins, die innerhalb der Einsatzfenster liegen müssten
+    # Vollstaendigkeit INNERHALB der Betriebsphasen. Zaehler und Nenner muessen
+    # dieselbe Basis haben: v sind die Betriebsbins, also duerfen die erwarteten
+    # Bins auch nur aus deren Einsatzfenstern kommen. Mit segments(df) ueber alle
+    # Bins ergab das 10 von 2016 = "0 % vollstaendig".
     expected = sum(max((s["end"] - s["start"]).total_seconds() / (BIN_MINUTES * 60), 1)
-                   for s in segments(df))
+                   for s in segments(v))
     coverage = min(len(v) / expected, 1.0) if expected else 0.0
 
     for s in BANK1_TEMPS + BANK2_TEMPS + FLAP_TEMPS:
@@ -464,7 +467,12 @@ def assess(kpi, ref, quality, coverage):
 
     worst = "gruen"
     bewertbar = [r for r in rows + silent if r["status"] in STATUS]
-    if not ref["_sufficient"] or not bewertbar:
+    # Zu wenig Betrieb in der Berichtswoche: die Kennzahlen stuenden dann auf
+    # einer Handvoll Bins. Eine Woche mit 48 Minuten Laufzeit laesst keine
+    # Aussage ueber den Motorzustand zu - "unauffaellig" waere eine Behauptung,
+    # welche die Daten nicht tragen.
+    zu_wenig = kpi.get("operating_hours", 0.0) < MIN_WEEK_OPERATING_HOURS
+    if not ref["_sufficient"] or not bewertbar or zu_wenig:
         # Keine einzige Kennzahl konnte gegen eine Referenz geprueft werden.
         # "unauffaellig" waere hier eine Aussage, die die Daten nicht hergeben.
         worst = "keine"
@@ -487,7 +495,14 @@ def assess(kpi, ref, quality, coverage):
 
     # Begründungssatz
     if worst == "keine":
-        if not ref["_sufficient"]:
+        if kpi.get("operating_hours", 0.0) < MIN_WEEK_OPERATING_HOURS and \
+                kpi.get("operating_hours", 0.0) > 0:
+            stunden = f"{kpi['operating_hours']:.1f}".replace(".", ",")
+            reason = (f"Das Fahrzeug war in diesem Zeitraum nur "
+                      f"{stunden} Stunden in Betrieb. Das "
+                      f"reicht für eine belastbare Bewertung nicht aus; die "
+                      f"Messwerte sind im Detailteil trotzdem dokumentiert.")
+        elif not ref["_sufficient"]:
             reason = ("Für dieses Fahrzeug liegen noch zu wenige Betriebsstunden "
                       "vor. Der Normalbereich wird derzeit aufgebaut, eine "
                       "Bewertung erfolgt ab der nächsten vollständigen "

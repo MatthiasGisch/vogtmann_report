@@ -85,7 +85,11 @@ def analyse(df, veh, report_start, report_end):
     return {"veh": veh, "week": week, "kpi": kpi, "kpi_prev": kpi_prev,
             "ref": ref, "rows": rows, "status": worst, "reason": reason,
             "quality": quality, "excluded": excluded, "coverage": coverage,
-            "segments": A.segments(week), "daily": cur_h, "daily_prev": prev_h,
+            # Einsaetze aus den BETRIEBSbins. Mit allen Bins ergab das bei
+            # durchgehend sendender Box "1 Einsatz, 168 Stunden" - die
+            # ganze Woche als ein einziger Einsatz.
+            "segments": A.segments(A.operating(A.valid(week), veh)),
+            "daily": cur_h, "daily_prev": prev_h,
             # Ein Fahrzeug kann eine Woche stehen. Dann gibt es nichts zu
             # zeichnen - der Bericht muss das aushalten und darf nicht abbrechen.
             "has_data": not kpi.get("empty", False)
