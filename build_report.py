@@ -53,7 +53,7 @@ def analyse(df, veh, report_start, report_end):
     prev = df[(df.index >= report_start - pd.Timedelta(days=7)) & (df.index < report_start)]
     ref_raw = df[df.index < report_start - pd.Timedelta(days=7)]
 
-    quality, excluded, coverage = A.data_quality(week)
+    quality, excluded, coverage = A.data_quality(week, veh)
     th = veh["pressure_threshold"]
 
     ref_weeks = []
@@ -64,16 +64,23 @@ def analyse(df, veh, report_start, report_end):
         if not chunk.empty:
             # Mit derselben Ausschlussliste wie die Berichtswoche, sonst wird
             # eine Kennzahl aus drei Sensoren gegen eine aus zwei verglichen.
-            ref_weeks.append(A.weekly_kpis(chunk, th, excluded))
+            ref_weeks.append(A.weekly_kpis(chunk, th, excluded, veh))
     ref = A.reference(ref_weeks)
 
-    kpi = A.weekly_kpis(week, th, excluded)
-    kpi_prev = A.weekly_kpis(prev, th) if not prev.empty else {"operating_hours": 0.0}
+    kpi = A.weekly_kpis(week, th, excluded, veh)
+    kpi_prev = (A.weekly_kpis(prev, th, excluded, veh) if not prev.empty
+                else {"operating_hours": 0.0})
     rows, worst, reason = A.assess(kpi, ref, quality, coverage)
 
-    hours = lambda d: (d.groupby(d.index.dayofweek)["samples"].sum() / 3600.0)
+    # Tagesbalken ebenfalls aus Betriebsbins statt aus der Messwertzahl
+    def hours(d):
+        op = A.operating(A.valid(d), veh)
+        if op.empty:
+            return pd.Series(dtype=float)
+        return op.groupby(op.index.dayofweek).size() * BIN_MINUTES / 60.0
     cur_h = hours(week).reindex(range(7), fill_value=0.0).tolist()
-    prev_h = hours(prev).reindex(range(7), fill_value=0.0).tolist() if not prev.empty else [0] * 7
+    prev_h = (hours(prev).reindex(range(7), fill_value=0.0).tolist()
+              if not prev.empty else [0] * 7)
 
     return {"veh": veh, "week": week, "kpi": kpi, "kpi_prev": kpi_prev,
             "ref": ref, "rows": rows, "status": worst, "reason": reason,
@@ -81,14 +88,15 @@ def analyse(df, veh, report_start, report_end):
             "segments": A.segments(week), "daily": cur_h, "daily_prev": prev_h,
             # Ein Fahrzeug kann eine Woche stehen. Dann gibt es nichts zu
             # zeichnen - der Bericht muss das aushalten und darf nicht abbrechen.
-            "has_data": not kpi.get("empty", False) and len(A.valid(week)) > 5}
+            "has_data": not kpi.get("empty", False)
+                        and len(A.operating(A.valid(week), veh)) > 3}
 
 
 def make_plots(r, start, end):
     if not r["has_data"]:
         return None
     v = r["veh"]["car_id"]
-    w = A.valid(r["week"])
+    w = A.operating(A.valid(A.clean(r["week"])), r["veh"])
     axis = P.OpAxis(w.index)
 
     # Y-Bereich aus den WARMEN Bins, nicht aus allen: jeder Einsatz startet beim
@@ -98,7 +106,7 @@ def make_plots(r, start, end):
     # gestaucht. Die Warmlauframpen laufen so unten aus dem Bild; darauf weist der
     # Anhang hin.
     cols = [f"{s}_mean" for s in BANK1_TEMPS + BANK2_TEMPS if s not in r["excluded"]]
-    warm_bins = A.warm(w, r["excluded"])
+    warm_bins = A.warm(w, r["excluded"], r["veh"])
     src = warm_bins if len(warm_bins) > 20 else w
     lo = float(src[cols].quantile(0.01).min())
     hi = float(src[cols].max().max())

@@ -25,7 +25,9 @@ from config import (BANK1_TEMPS, BANK2_TEMPS, FLAP_TEMPS, BIN_MINUTES,
                     SEGMENT_GAP_MINUTES, EVENT_MERGE_MINUTES, MIN_VALID_SECONDS,
                     WARMUP_LIMIT_C, TOL_GREEN, TOL_YELLOW, MIN_BAND_K,
                     MIN_ABS_BAND, REF_MIN_OPERATING_HOURS, RANGE_LIMITS, STATUS,
-                    SENSOR_LABELS, RED_FACTOR, PRESSURES, MIN_RATE_HOURS)
+                    SENSOR_LABELS, RED_FACTOR, PRESSURES, MIN_RATE_HOURS,
+                    DEFAULT_OPERATING_THRESHOLD, OCCUPANCY_OPERATING_LIMIT,
+                    SENTINEL_VALUES)
 
 
 # ----------------------------------------------------------- Grundgerüst ----
@@ -41,21 +43,87 @@ def segments(df):
         out.append({
             "start": g.index[0],
             "end": g.index[-1] + pd.Timedelta(minutes=BIN_MINUTES),
-            "seconds": int(g["samples"].sum()),
+            # Dauer aus der Zahl der Bins, nicht aus samples: ein Messwert
+            # ist keine Sekunde Laufzeit (die Box schreibt alle vier Sekunden).
+            "seconds": int(len(g) * BIN_MINUTES * 60),
         })
     return out
 
 
+def clean(df):
+    """Sentinel-Werte der Sensorik zu NaN machen.
+
+    Ein Thermoelement meldet Fuehlerbruch nicht als Luecke, sondern mit einem
+    festen Ersatzwert (gemessen: -999). Ungefiltert wandert der in jeden
+    Mittelwert und jede Spreizung und verfaelscht sie massiv.
+    """
+    if df.empty:
+        return df
+    out = df.copy()
+    num = [c for c in out.columns if c != "samples"]
+    for sentinel in SENTINEL_VALUES:
+        out[num] = out[num].mask(out[num] == sentinel)
+    return out
+
+
 def valid(df):
-    """Bins mit ausreichender Laufzeit."""
-    return df[df["samples"] >= MIN_VALID_SECONDS]
+    """Bins, die ueberhaupt auswertbar sind.
+
+    Frueher: samples >= 60, in der Annahme "1 Messwert = 1 Sekunde Laufzeit".
+    Diese Annahme gilt nicht - die Sensorbox schreibt alle vier Sekunden und
+    bei einem der beiden Fahrzeuge rund um die Uhr. Ein Bin ist deshalb
+    auswertbar, sobald er ueberhaupt Messwerte enthaelt; ob der Motor lief,
+    entscheidet operating().
+    """
+    return df[df["samples"] > 0]
 
 
-def warm(df, excluded=()):
-    """Bins ohne Kaltstartphase (beide Bänke über der Warmlaufgrenze)."""
-    b1 = _bank_mean(df, BANK1_TEMPS, excluded)
-    b2 = _bank_mean(df, BANK2_TEMPS, excluded)
-    return df[(b1 > WARMUP_LIMIT_C) & (b2 > WARMUP_LIMIT_C)]
+def occupancy(df):
+    """Anteil belegter Zeitfenster am Zeitraum - zeigt die Betriebsart der Box."""
+    if df.empty:
+        return 0.0
+    span = (df.index[-1] - df.index[0]).total_seconds() / 60.0 + BIN_MINUTES
+    moeglich = max(span / BIN_MINUTES, 1)
+    return min(len(df) / moeglich, 1.0)
+
+
+def operating(df, veh=None):
+    """Bins, in denen der Motor tatsaechlich lief.
+
+    Es gibt kein Betriebszustandssignal. Der Abgasgegendruck ist der beste
+    Ersatz, weil er nur bei laufendem Motor entsteht - anders als die
+    Temperatur, die nach dem Abstellen lange nachlaeuft.
+
+    Sendet die Box ohnehin nur bei Betrieb (niedriger Belegungsgrad), ist jeder
+    vorhandene Bin bereits Betrieb und es wird nicht zusaetzlich gefiltert.
+    """
+    if df.empty:
+        return df
+    veh = veh or {}
+    dauerbetrieb = veh.get("continuous")
+    if dauerbetrieb is None:                       # nicht konfiguriert: schaetzen
+        dauerbetrieb = occupancy(df) >= OCCUPANCY_OPERATING_LIMIT
+    if not dauerbetrieb:
+        return df                                  # Box sendet nur bei Betrieb
+    schwelle = veh.get("operating_threshold", DEFAULT_OPERATING_THRESHOLD)
+    pmax = df[[f"{p}_max" for p in PRESSURES]].max(axis=1)
+    return df[pmax > schwelle]
+
+
+def warm(df, excluded=(), veh=None):
+    """Betriebsbins ohne Kaltstartphase.
+
+    Zuerst Betrieb (Druck), dann Warmlauf (Temperatur). Die Reihenfolge ist
+    wichtig: Nach dem Abstellen bleibt der Motor noch lange ueber der
+    Warmlaufgrenze - ohne den Druckfilter wuerde die Abkuehlphase als Betrieb
+    gezaehlt.
+    """
+    op = operating(df, veh)
+    if op.empty:
+        return op
+    b1 = _bank_mean(op, BANK1_TEMPS, excluded)
+    b2 = _bank_mean(op, BANK2_TEMPS, excluded)
+    return op[(b1 > WARMUP_LIMIT_C) & (b2 > WARMUP_LIMIT_C)]
 
 
 def _cols(sensors, excluded, suffix="_mean"):
@@ -83,12 +151,17 @@ def _wmean(series, weights):
 
 # ------------------------------------------------------------ Kennzahlen ----
 
-def weekly_kpis(df, threshold, excluded=()):
+def weekly_kpis(df, threshold, excluded=(), veh=None):
     """Alle Wochenkennzahlen aus einem Bin-DataFrame einer Woche."""
+    df = clean(df)
     v = valid(df)
-    w = warm(v, excluded)
-    hours = float(df["samples"].sum()) / 3600.0
-    segs = segments(df)
+    op = operating(v, veh)
+    w = warm(v, excluded, veh)
+    # Betriebszeit aus der Zahl der Betriebsbins. Frueher aus der Summe der
+    # Messwerte geteilt durch 3600 - das ergab bei durchgehend sendender Box
+    # in jeder Woche dieselben 42 Stunden, unabhaengig vom Fahrbetrieb.
+    hours = len(op) * BIN_MINUTES / 60.0
+    segs = segments(op)
 
     if w.empty:
         return {"operating_hours": hours, "segments": len(segs), "empty": True}
@@ -101,7 +174,7 @@ def weekly_kpis(df, threshold, excluded=()):
     sp2 = w[_cols(BANK2_TEMPS, excluded)].max(axis=1) - w[_cols(BANK2_TEMPS, excluded)].min(axis=1)
 
     press = pd.concat([w["abgas_1_value_max"], w["abgas_2_value_max"]])
-    ev = events(df, threshold, excluded)
+    ev = events(df, threshold, excluded, veh)
     sw = w["samples"]
 
     return {
@@ -137,9 +210,9 @@ def weekly_kpis(df, threshold, excluded=()):
 SEVERITY = ["leicht", "deutlich", "stark"]
 
 
-def events(df, threshold, excluded=()):
+def events(df, threshold, excluded=(), veh=None):
     """Zusammenhängende Überschreitungen als einzelne Vorfälle."""
-    v = valid(df)
+    v = valid(clean(df))
     if v.empty:
         return []
     # Bins mit unplausiblem Druck ausschliessen: ein defekter Sensor mit
@@ -255,10 +328,15 @@ def evaluate(key, value, ref):
 
 # --------------------------------------------------------- Datenqualität ----
 
-def data_quality(df):
-    """Vier Prüfungen aus Konzept 10. Liefert Befunde und Ausschlussliste."""
+def data_quality(df, veh=None):
+    """Vier Prüfungen aus Konzept 10. Liefert Befunde und Ausschlussliste.
+
+    Nur innerhalb der Betriebsphasen: Bei stehendem Motor ist ein konstanter
+    Messwert normal, kein Festhaenger - die Pruefung meldete sonst "über 10080
+    Minuten unveraenderter Wert", also die ganze Woche.
+    """
     findings, excluded = [], []
-    v = valid(df)
+    v = operating(valid(clean(df)), veh)
     if v.empty:
         return ([{"kind": "Ausfall", "text": "Keine gültigen Messdaten im Zeitraum."}],
                 [], 0.0)

@@ -114,10 +114,28 @@ RANGE_LIMITS = {
 # weil er nur bei laufendem Motor entsteht - anders als die Temperatur, die nach
 # dem Abstellen noch lange nachlaeuft.
 #
-# None = Betriebserkennung deaktiviert, es wird wie bisher ueber die
-# Warmlaufgrenze gefiltert. Den Wert erst nach "python3 check_signals.py"
-# setzen, nicht raten.
-PRESSURE_OPERATING_THRESHOLD = None
+# Geeicht am 28.09.2026 mit check_signals.py ueber vier Wochen:
+#
+#   CAR_002 (Box sendet durchgehend): Schwelle 1142 -> 11,1 h/Woche
+#   CAR_001 (Box sendet nur bei Betrieb): 531 Bins  -> 11,1 h/Woche
+#
+# Zwei unabhaengige Verfahren, dasselbe Ergebnis, und es deckt sich mit der
+# Erfahrung aus dem Betrieb (10-12 h/Woche). Der Wert steht je Fahrzeug in
+# VEHICLES, weil die Drucksensoren unterschiedliche Nullpunkte haben:
+# CAR_001 ruht bei +1513, CAR_002 bei -58.
+DEFAULT_OPERATING_THRESHOLD = 1150
+
+# Fallback, falls ein Fahrzeug kein "continuous" gesetzt hat: unterhalb dieses
+# Belegungsgrades gilt die Box als "sendet nur bei Betrieb". Die Automatik ist
+# bewusst nur Rueckfallebene - sie kann bei verstreuten Einsaetzen danebenliegen.
+# Massgeblich ist das Feld "continuous" je Fahrzeug, ablesbar mit check_signals.py.
+OCCUPANCY_OPERATING_LIMIT = 0.50
+
+# Fehlerwerte der Sensorik. Ein Thermoelement meldet Fuehlerbruch nicht als
+# Luecke, sondern mit einem Sentinel - gemessen wurde -999. Solche Werte muessen
+# vor jeder Rechnung zu NaN werden, sonst wandern sie in Mittelwerte und
+# Spreizungen.
+SENTINEL_VALUES = (-999.0, -9999.0, 999.9)
 
 # --------------------------------------------------------------- Fahrzeuge ---
 VEHICLES = [
@@ -126,12 +144,23 @@ VEHICLES = [
         "name": "Fahrzeug 1",
         "plate": "Y-23-6862",
         "pressure_threshold": 2000,
+        # Box sendet nur bei laufendem Motor (Belegung 7 %), gemessen 28.09.2026.
+        # Jeder vorhandene Bin ist damit bereits Betrieb.
+        "continuous": False,
+        # Ruheniveau +1513 - nur relevant, falls die Box auf Dauerbetrieb
+        # umgestellt wird
+        "operating_threshold": 2700,
     },
     {
         "car_id": "CAR_002",
         "name": "Fahrzeug 2",
         "plate": "Y-49-3779",
         "pressure_threshold": 2200,
+        # Box sendet durchgehend (Belegung 100 %), gemessen 28.09.2026.
+        # Betrieb muss deshalb ueber den Abgasgegendruck erkannt werden.
+        "continuous": True,
+        # Ruheniveau -58, geeicht auf 11,1 h/Woche
+        "operating_threshold": 1150,
     },
 ]
 
