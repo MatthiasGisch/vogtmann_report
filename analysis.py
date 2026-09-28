@@ -362,7 +362,7 @@ def data_quality(df, veh=None):
         if good == 0:
             excluded.append(s)
             findings.append({
-                "kind": "Abriss",
+                "kind": "Abriss", "intern": True,
                 "text": f"{side}, {spot}: hat im gesamten Zeitraum keine Werte "
                         f"geliefert. Diese Messstelle wurde aus der Auswertung "
                         f"ausgeschlossen.",
@@ -371,7 +371,7 @@ def data_quality(df, veh=None):
         if good < len(v) * 0.5:
             excluded.append(s)
             findings.append({
-                "kind": "Abriss",
+                "kind": "Abriss", "intern": True,
                 "text": f"{side}, {spot}: nur {good} von {len(v)} Messpunkten "
                         f"vorhanden. Diese Messstelle wurde aus der Auswertung "
                         f"ausgeschlossen.",
@@ -390,7 +390,7 @@ def data_quality(df, veh=None):
         if run.max() >= 6:                       # >= 30 Minuten konstant
             excluded.append(s)
             findings.append({
-                "kind": "Festhänger",
+                "kind": "Festhänger", "intern": True,
                 "text": f"{side}, {spot}: über {int(run.max()) * BIN_MINUTES} Minuten "
                         f"unveränderter Wert bei laufendem Motor. Diese Messstelle "
                         f"wurde aus der Auswertung ausgeschlossen; die übrigen Werte "
@@ -401,7 +401,7 @@ def data_quality(df, veh=None):
         lo, hi = RANGE_LIMITS["temp"]
         bad = int(((v[f"{s}_max"] > hi) | (v[f"{s}_min"] < lo)).sum())
         if bad:
-            findings.append({"kind": "Bereich",
+            findings.append({"kind": "Bereich", "intern": True,
                              "text": f"{side}, {spot}: {bad} Messwerte außerhalb des "
                                      f"plausiblen Bereichs."})
 
@@ -412,7 +412,7 @@ def data_quality(df, veh=None):
         bad = int(((v[f"{pcol}_max"] > phi) | (v[f"{pcol}_mean"] < plo)).sum())
         if bad:
             findings.append({
-                "kind": "Bereich-Druck",
+                "kind": "Bereich-Druck", "intern": True,
                 "text": f"Abgasgegendruck {label}: {bad} Messwerte außerhalb des "
                         f"plausiblen Bereichs. "
                         f"Auffälligkeiten aus diesem Zeitraum sind nicht belastbar.",
@@ -465,6 +465,12 @@ def assess(kpi, ref, quality, coverage):
     rows = [judge(k) for k in REPORT_METRICS if k in kpi]      # im Bericht sichtbar
     silent = [judge(k) for k in SILENT_METRICS if k in kpi]    # nur bewertet
 
+    # Reicht die Betriebszeit nicht, darf auch keine einzelne Kennzahl als
+    # "normal" dastehen - sonst widerspricht die Tabelle der Kopfzeile.
+    if kpi.get("operating_hours", 0.0) < MIN_WEEK_OPERATING_HOURS:
+        for r in rows + silent:
+            r["status"] = "keine"
+
     worst = "gruen"
     bewertbar = [r for r in rows + silent if r["status"] in STATUS]
     # Zu wenig Betrieb in der Berichtswoche: die Kennzahlen stuenden dann auf
@@ -482,16 +488,11 @@ def assess(kpi, ref, quality, coverage):
                 worst = r["status"]
         if coverage < 0.90:
             worst = "orange" if STATUS[worst]["rank"] < 2 else worst
-        # Jede ausgeschlossene Messstelle, nicht nur ein Festhaenger:
-        # eine fehlende Messstelle macht die Bank-Kennzahlen unvollstaendig.
-        if any(f["kind"] in ("Festhänger", "Abriss") for f in quality):
-            worst = "orange" if STATUS[worst]["rank"] < 2 else worst
-        # Ein unplausibler Drucksensor macht die Vorfallserkennung blind -
-        # "unauffällig" hiesse dann nur, dass nichts gemessen werden konnte.
-        if any(f["kind"] == "Bereich-Druck" for f in quality):
-            worst = "orange" if STATUS[worst]["rank"] < 2 else worst
-        elif any(f["kind"] == "Bereich" for f in quality):
-            worst = "gelb" if STATUS[worst]["rank"] < 1 else worst
+        # Sensorbefunde (Ausfall, Festhaenger, Bereich) heben den Status
+        # bewusst NICHT an: Sie erscheinen auf Wunsch nicht im Bericht, und
+        # eine Warnung ohne nachlesbare Begruendung ist schlechter als keine.
+        # Die betroffenen Messstellen werden weiterhin aus der Auswertung
+        # ausgeschlossen und im Logfile protokolliert.
 
     # Begründungssatz
     if worst == "keine":
@@ -523,10 +524,6 @@ def assess(kpi, ref, quality, coverage):
         for r in silent:
             if r["status"] in ("gelb", "orange", "rot") and r["key"] == "event_rate":
                 parts.append("mehr Auffälligkeiten je Betriebsstunde als üblich")
-        if any(f["kind"] in ("Festhänger", "Abriss") for f in quality):
-            parts.append("eine Messstelle liefert keine verwertbaren Werte")
-        if any(f["kind"] == "Bereich-Druck" for f in quality):
-            parts.append("die Druckmessung ist zeitweise unplausibel")
         if coverage < 0.90:
             parts.append(f"die Messdaten sind nur zu {coverage * 100:.0f} % vollständig")
         if parts:
@@ -540,6 +537,10 @@ def assess(kpi, ref, quality, coverage):
             else:
                 tail = "; übrige Werte unauffällig."
             reason = joined[0].upper() + joined[1:] + tail
+        elif any(f.get("intern") for f in quality):
+            # Sensorbefunde werden nicht genannt - dann darf hier aber auch
+            # nicht "die Messdaten sind vollständig" behaupten werden.
+            reason = "Alle ausgewerteten Kennzahlen liegen im Normalbereich."
         else:
             reason = ("Alle Kennzahlen liegen im Normalbereich, die Messdaten sind "
                       "vollständig.")

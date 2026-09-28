@@ -308,13 +308,20 @@ def page_condition(c, r, ctx, page_no, total, p):
     text(c, M, y, "Alle Kennzahlen im Vergleich zum Normalbereich", 9.5, F_BOLD)
     y = metric_table(c, y + 8, r) + 14
 
-    findings = r["quality"]
+    # Sensorbezogene Befunde erscheinen bewusst nicht im Bericht (Wunsch
+    # 28.09.2026). Sie stehen im Logfile und die Messstellen bleiben
+    # ausgeschlossen - nur der Kunde liest nichts ueber Sensorausfaelle.
+    findings = [f for f in r["quality"] if not f.get("intern")]
     if findings:
         txt = " ".join(f["text"] for f in findings)
     else:
-        txt = (f"Die Messdaten sind vollständig ({de(r['coverage'] * 100, 0)} % der "
-               f"erwarteten Messpunkte). Alle Messstellen haben durchgehend "
-               f"plausible Werte geliefert.")
+        # Zweiter Satz nur, wenn wirklich alle Messstellen sauber gemeldet
+        # haben - sonst stuende hier eine Behauptung, die nicht stimmt.
+        txt = (f"Die Messdaten decken den Betriebszeitraum zu "
+               f"{de(r['coverage'] * 100, 0)} % ab.")
+        if not any(f.get("intern") for f in r["quality"]):
+            txt += (" Alle Messstellen haben durchgehend plausible Werte "
+                    "geliefert.")
     # Hoehe aus dem Text ableiten, sonst laeuft die Box bei mehreren Befunden ueber
     nl = len(wrap_lines(c, txt, CONTENT_W - 24, 7.6))
     box(c, M, y, CONTENT_W, 24 + nl * 9.6 + 8, fill=SURFACE_SOFT)
@@ -439,6 +446,10 @@ def build(raw, report_end, out_path, log=print):
         page_errors(c, ctx, n, total, failed)
     c.save()
 
+    for r in results:
+        for f in r["quality"]:
+            if f.get("intern"):
+                log(f"  {r['veh']['car_id']} Datenqualitaet [{f['kind']}]: {f['text']}")
     for r in results:
         log(f"  {r['veh']['car_id']}: {r['status']} · "
             f"{r['kpi']['operating_hours']:.1f} h · "
